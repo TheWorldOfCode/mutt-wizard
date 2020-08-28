@@ -1,0 +1,80 @@
+#!/bin/sh
+
+config=$HOME/.config/davmail
+cache=/tmp/davmail
+lock=/tmp/davmail.lock
+
+lock(){
+    # Check is Lock File exists, if not create it and set trap on exit
+    if { set -C; 2>/dev/null > $lock; }; then
+        trap "rm -f $lock" EXIT
+    else
+        sleep 2s 
+        lock 
+    fi
+
+}
+
+open() {
+
+    [ ! -f $cache ] && touch $cache
+
+    if [ $(grep -c $1 $cache) -ne 0 ]; then
+        data=$(grep $1 $cache)
+
+        pid=$(cut -d' ' -f1 <<< $data)
+        properties=$(cut -d' ' -f2 <<< $data)
+        count=$(cut -d' ' -f3 <<< $data)
+
+        new_data="$pid $properties $((count + 1))"
+
+        sed -i "s/$data/$new_data/g" $cache
+    else
+        davmail $config/$1.properties &
+        echo "$! $1 1" >> $cache
+    fi
+}
+
+close() {
+
+    [ ! -f $cache ] && touch $cache
+
+    if [ $(grep -c $1 $cache) -ne 0 ]; then
+        data=$(grep $1 $cache)
+
+        pid=$(cut -d' ' -f1 <<< $data)
+        properties=$(cut -d' ' -f2 <<< $data)
+        count=$(cut -d' ' -f3 <<< $data)
+
+        if [ $count -eq 1 ]; then
+            kill $pid 
+
+            sed -i "/$data/d" $cache
+        else
+            new_data="$pid $properties $((count - 1))"
+            sed -i "s/$data/$new_data/g" $cache
+        fi
+
+    else
+        echo "No davmail is running with $1 as configuration file"
+    fi
+}
+
+lock 
+case "$1" in 
+    ls) cat $cache;;
+    open) open $2;;
+    close) close $2;;
+    *) cat << EOF
+        davmail_handler: Provides a counting semaphore of davmail
+
+        Allowed options:
+        ls              List all the state of the semaphore
+        open CONFIG     Open davmail with the configuration file CONFIG 
+        close CONFIG    Close davmail with the configuration file CONFIG
+        all else	Print this message
+
+EOF
+esac
+
+exit
