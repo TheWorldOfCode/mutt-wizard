@@ -14,6 +14,8 @@ and configs for
 .B msmtp
 for sending mail, and also passwords automatically encrypted and stored with
 .B pass.
+It will also allow exchange server through 
+.B davmail.
 .SH COMMANDS
 .TP
 .B add
@@ -28,9 +30,14 @@ delete the configuration files for an already configured email account
 .B purge
 totally purge all local mutt-wizard accounts
 .TP
-.B sync
+.B sync [account] 
 sync mail accounts then update notmuch database
-.B mailsync
+.TP
+.B send [account] [msmtp] 
+Send a mail with account and msmtp options
+.B cron 
+toggle a cronjob that will automatically sync mail with
+.B mw sync
 as often as you wish
 .SH DETAILS
 .TP
@@ -106,6 +113,15 @@ and
 variables in your
 .I
 gpg-agent.conf.
+.TP 
+.B  Exchange server
+In order to connect to exchange are 
+.B davmail 
+used, which is a gateway. It requires a 
+.I url 
+which is server specific. The different setting of davmail will be saved at 
+.I ~/.config/davmail 
+
 .SH MUTT-WIZARD'S NEOMUTT CONFIGURATION
 Here is a list of not only mutt-wizard's particular defaults, but what you need to get the most out of email accounts configured with mutt-wizard.
 .TP

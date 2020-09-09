@@ -1,13 +1,12 @@
 #!/bin/sh
-
 command -V gpg >/dev/null 2>&1 && GPG="gpg" || GPG="gpg2"
 [ -z ${PASSWORD_STORE_DIR+x} ] && PASSWORD_STORE_DIR="$HOME/.password-store"
 [ -r "$PASSWORD_STORE_DIR/.gpg-id" ] &&
     "$GPG" --list-secret-keys $(cat "$PASSWORD_STORE_DIR/.gpg-id") >/dev/null 2>&1 || {
-        printf "\`pass\` must be installed and initialized to encrypt passwords.\\nBe sure it is installed and run \`pass init <yourgpgemail>\`.\\nIf you don't have a GPG public private key pair, run \`%s --full-gen-key\` first.\\n" "$GPG"
+        printf "\`pass\` must be installed and initialized to encrypt passwords.\\nBe sure it is installed and run \`pass init <yourgpgemail>\`.\\nIf you don\'t have a GPG public private key pair, run \`%s --full-gen-key\` first.\\n" "$GPG"
         exit
     }
-! command -v mbsync >/dev/null && printf "\`mbsync (isync package)\` must be installed to run mutt-wizard.\\n" && exit
+! command -v mbsync >/dev/null && printf " \`mbsync (isync package)\` must be installed to run mutt-wizard.\\n" && exit
 
 prefix="/usr/local"
 muttdir="$HOME/.config/mutt"		# Main mutt config location
@@ -76,15 +75,12 @@ MaxMessages $maxmes
 ExpireUnread no
 # End profile
 "
-
-if [ "$accounttype" = "offline" ]; then
-    sendMail="set sendmail = \"msmtp -a $title\""
-    [ $domain == "davmail" ] && sendMail="set sendmail = \"davmail_handler open $title; sleep 1s; msmtp -a $title; davmail_handler close $title\""
+if [ "$accounttype" = "offline" ]; then 
 mutt_profile="# vim: filetype=neomuttrc
 # muttrc file for account $title
 set realname = \"$realname\"
 set from = \"$fulladdr\"
-$sendMail
+set sendmail = \"mw send $title\"
 alias me $realname <$fulladdr>
 set folder = \"$maildir/$title\"
 set header_cache = $cachedir/$title/headers
@@ -101,7 +97,7 @@ bind index,pager g noop
 bind index,pager M noop
 bind index,pager C noop
 bind index gg first-entry
-macro index o \"<shell-escape>mbsync -V $title<enter>\" \"run mbsync to sync $title\"
+macro index o \"<shell-escape>mw sync $title<enter>\" \"run mbsync to sync $title\"
 unmailboxes *
 "
 else
@@ -109,7 +105,7 @@ mutt_profile="# vim: filetype=neomuttrc
 # muttrc file for account $title
 set realname = \"$realname\"
 set from = \"$fulladdr\"
-set sendmail = \"msmtp -a $title\"
+set sendmail = \"mw send $title\"
 alias me $realname <$fulladdr>
 set folder = \"imaps://$login@$imap:$iport\"
 set imap_user = \"$login\"
@@ -487,23 +483,39 @@ purge() {
     }
 
 syncwrapper() {
-    for rc in $davmaildir/*; do
-        davmail_handler open "$(echo $rc | sed "s|$davmaildir/||" | cut -d'.' -f1)"
-    done 
-    sleep 5s 
+    if [ x$1 == "x" ]; then
+        getaccounts 
+        for account in $(echo "$accounts" | sed 's/[0-9]: //'); do
+            syncwrapper $account 
 
-    mbsync -a &
-    pid_mb=$!
+        done
+    else
+        [ -f $davmaildir/$1.properties ] && davmail_handler open $1 && sleep 5
 
-    kill -46 "$(pidof "${STATUSBAR:-dwmblocks}")"
-    wait $pid_mb
-    kill -46 "$(pidof "${STATUSBAR:-dwmblocks}")"
-    notmuch new
+        mbsync $1 &
+        pid_mb=$!
 
-    for rc in $davmaildir/*; do
-        davmail_handler close "$(echo $rc | sed "s|$davmaildir/||" | cut -d'.' -f1)"
-    done 
+        kill -46 "$(pidof "${STATUSBAR:-dwmblocks}")"
+        wait $pid_mb
+        kill -46 "$(pidof "${STATUSBAR:-dwmblocks}")"
+        notmuch new
 
+       [ -f $davmaildir/$1.properties ] && davmail_handler close $1
+    fi
+
+}
+
+
+sendwrapper() {
+
+    [ -f $davmaildir/$1.properties ] && davmail_handler open $1 && sleep 5
+
+    echo $1 > /tmp/neomutt-test-1
+    echo ${@:2} > /tmp/neomutt-test-2 
+
+    msmtp -a  ${@:2}
+
+    [ -f $davmaildir/$1.properties ] && davmail_handler close $1
 }
 
 notmuchauto() { 
@@ -524,6 +536,28 @@ notmuchauto() {
     [crypto]
     gpg_path=$GPG"
     echo "$nmbasic" > "$NOTMUCH_CONFIG" ;
+} 
+
+choosecron() { ! pgrep cron >/dev/null && echo "No cron manager running. Install/enable one and then select this o
+    ption again." && return 1
+    if crontab -l | grep mailsync >/dev/null; then
+        echo "Active mail sync cronjob detected. Do you want to remove it?"
+        printf "\033[36m\t"
+        read -r rmyn
+        printf "\033[0m"
+        echo "$rmyn" | grep -i "^y\(es\)*$" >/dev/null && crontab -l | sed '/mw sync/d' | crontab - >/dev/null && echo "Mail sync turned off."
+    else
+        echo "How many minutes between each mail sync?"
+        printf "\033[36m\t"
+        read -r minnum
+        printf "\033[0m"
+        while ! echo "$minnum" | grep "^[0-9]\+$" >/dev/null; do
+            printf "That doesn't look like a number. How many minutes between each mail sync?\\n\033[36m\t"
+            read -r minnum
+            printf "\033[0m"
+        done
+        (crontab -l; echo "*/$minnum * * * * export PASSWORD_STORE_DIR=$PASSWORD_STORE_DIR; export PATH=$PATH/usr/local/bin/ $(type mw | cut -d' ' -f3) sync >/dev/null 2>&1") | crontab - >/dev/null && echo "Cronjob added. Mail will sync every $minnum minutes. Be sure you have your cron manager running."
+        fi ;
 }
 
 trap 'echo -e "\033[0m\n"; exit' INT ABRT
@@ -533,7 +567,9 @@ case "$1" in
     add) asktype && askinfo && tryconnect && finalize || delete; [ $domain = "davmail" ] && davmail_handler close $title;;
     pass) pick "change the password of" && getpass ;;
     delete) pick delete && confirm "delete the \`$title\` profile" && delete ;;
-    sync) syncwrapper ;;
+    sync) syncwrapper $2 ;;
+    send) sendwrapper $2 "${@:2}";; 
+    cron) choosecron ;;
     purge) purge ;;
     *) cat << EOF
         mw: mutt-wizard, auto-configure email accounts for mutt
@@ -544,10 +580,12 @@ case "$1" in
         ls		List configured accounts
         delete	Pick an account to delete
         purge		Delete all accounts and settings
-        sync		Syncs mail and updates notmuch database
+        sync [account] Syncs mail and updates notmuch database. If account is set the only sync for that account
+        send [account] [msmtp] Send mail with account and msmtp options. 
+        cron Add sync to crontab 
         all else	Print this message
 
         NOTE: Once at least one account is added, you can run
-        \`mbsync -a\` to begin downloading mail.
+        \`mw sync\` to begin downloading mail.
 EOF
 esac
